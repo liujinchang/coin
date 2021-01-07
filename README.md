@@ -5,16 +5,18 @@
 1、创世区块的创建;<br>
 2、工作量证明<br>
 3、客户端命令<br>
-	createblockchain -address ADDRESS - Create a blockchain and send genesis block reward to ADDRESS<br>
-	createwallet - Generates a new key-pair and saves it into the wallet file<br>
-	getbalance -address ADDRESS - Get balance of ADDRESS<br>
-	listaddresses - Lists all addresses from the wallet file<br>
-	printchain - Print all the blocks of the blockchain<br>
-	reindexutxo - Rebuilds the UTXO set<br>
-	send -from FROM -to TO -amount AMOUNT -mine - Send AMOUNT of coins from FROM address to TO. Mine on the same node, when -mine is set.<br>
-	startnode -miner ADDRESS - Start a node with ID specified in NODE_ID env. var. -miner enables mining<br>
-	showblock -hash HASH - Show block message<br>
-	listunspent - Lists all unspend output<br>
+```
+	createblockchain -address ADDRESS - Create a blockchain and send genesis block reward to ADDRESS
+	createwallet - Generates a new key-pair and saves it into the wallet file
+	getbalance -address ADDRESS - Get balance of ADDRESS
+	listaddresses - Lists all addresses from the wallet file
+	printchain - Print all the blocks of the blockchain
+	reindexutxo - Rebuilds the UTXO set
+	send -from FROM -to TO -amount AMOUNT -mine - Send AMOUNT of coins from FROM address to TO. Mine on the same node, when -mine is set.
+	startnode -miner ADDRESS - Start a node with ID specified in NODE_ID env. var. -miner enables mining
+	showblock -hash HASH - Show block message
+	listunspent - Lists all unspend output
+```
 4、交易签名<br>
 5、打包交易生成新的区块链<br>
 
