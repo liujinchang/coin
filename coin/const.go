@@ -4,9 +4,9 @@ const (
 	//根目录
 	Root = ".bitcoin"
 	//配置文件
-	ConfigFile = "bitcoin.conf"
+	configFile = "bitcoin.conf"
 	//区块数据库文件
-	DBFile = "blockchain_%s.db"
+	dbFileName = "blockchain_%s.db"
 	//区块状态(UTXO)数据库文件
 	StateFile = "chainstate_%s.db"
 	blocksBucket = "blocks"
@@ -25,5 +25,9 @@ const (
 	//地址检验和的位数
 	addressChecksumLen = 4
 	//钱包文件名
-	WalletFile = "wallet_%s.dat"
+	walletFileName = "wallet_%s.dat"
+	//内存池数据库文件名
+	mempoolFileName = "mempool_%s.db"
+	//内存池数据库桶
+	mempoolBucket = "mempool"
 )

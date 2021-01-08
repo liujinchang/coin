@@ -4,12 +4,14 @@ import (
 	"bytes"
 	"encoding/gob"
 	"fmt"
+	"os"
 	"strconv"
 	"strings"
 	"time"
 	"utils"
 )
 
+var nodeID = os.Getenv("NODE_ID")
 // Block represents a block in the blockchain
 type Block struct {
 	Timestamp     int64

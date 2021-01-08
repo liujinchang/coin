@@ -16,9 +16,10 @@ import (
 
 var nodeAddress string
 var miningAddress string
-var knownNodes = strings.Split(utils.GetConfig(Root+"/config/"+ConfigFile,"known_nodes"),",")
+var knownNodes = strings.Split(utils.GetConfig(Root+"/config/"+configFile,"known_nodes"),",")
 var blocksInTransit = [][]byte{}
 var mempool = make(map[string]Transaction)
+var mp = Mempool{}.ReBuild()
 
 type addr struct {
 	AddrList []string
@@ -183,7 +184,7 @@ func handleBlock(request []byte, bc *Blockchain) {
 	block := DeserializeBlock(blockData)
 	fmt.Println("Recevied a new block!")
 	if bc.db == nil {
-		dbFile := fmt.Sprintf(DBFile, os.Getenv("NODE_ID"))
+		dbFile := fmt.Sprintf(dbFile, os.Getenv("NODE_ID"))
 		db, err := bolt.Open(dbFile, 0600, nil)
 		utils.ErrorLog(err)
 		err = db.Update(func(tx *bolt.Tx) error {
@@ -315,8 +316,28 @@ func handleTx(request []byte, bc *Blockchain) {
 	utils.ErrorLog(err)
 	txData := payload.Transaction
 	tx := DeserializeTransaction(txData)
-	mempool[hex.EncodeToString(tx.ID)] = tx
+	//mempool := Mempool{Blockchain: bc}
 
+	mempool[hex.EncodeToString(tx.ID)] = tx
+	length := len(mempool)
+	if length >= 15 {
+		var transactions []Transaction
+		counter := len(mempool)-15
+		for id := range mempool {
+			transactions = append(transactions, mempool[id])
+			counter--
+			if counter == 0 {
+				break
+			}
+		}
+		mp.AddTransactions(transactions)
+	} else if length <= 10 {
+		counter := 10-len(mempool)+int((15-10)/2)
+		transactions := mp.FindTransactions(counter)
+		for _, t := range transactions {
+			mempool[hex.EncodeToString(t.ID)] = t
+		}
+	}
 	if nodeAddress == knownNodes[0] {
 		for _, node := range knownNodes {
 			if node != nodeAddress && node != payload.AddFrom {
@@ -344,7 +365,7 @@ func handleTx(request []byte, bc *Blockchain) {
 			UTXOSet := UTXOSet{Blockchain: bc}
 			UTXOSet = UTXOSet.Init()
 			UTXOSet.Update(newBlock)
-			defer UTXOSet.Db.Close()
+			defer UTXOSet.GetDB().Close()
 
 			fmt.Println("New block is mined!")
 			for _, tx := range txs {
@@ -441,4 +462,32 @@ func nodeIsKnown(addr string) bool {
 		}
 	}
 	return false
+}
+//内存与数据库交换交易
+func changeTransactions(){
+	length := len(mempool)
+	/*
+	 * 10，15为上下限的阀值，表示在内存中只存放10-15个交易
+	 * 		当内存中存储的交易大于15个时，把len(mempool)-15+int((15-10)/2)个数据从内存放入到数据库中
+	 * 		当内存中存储的交易小于10个时，把10-len(mempool)+int((15-10)/2)个数据从数据库中加载进内存
+	 *
+	 */
+	if length >= 15 {
+		var transactions []Transaction
+		counter := len(mempool)-15+int((15-10)/2)
+		for id := range mempool {
+			transactions = append(transactions, mempool[id])
+			counter--
+			if counter == 0 {
+				break
+			}
+		}
+		mp.AddTransactions(transactions)
+	} else if length <= 10 {
+		counter := 10-len(mempool)+int((15-10)/2)
+		transactions := mp.FindTransactions(counter)
+		for _, t := range transactions {
+			mempool[hex.EncodeToString(t.ID)] = t
+		}
+	}
 }

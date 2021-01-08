@@ -12,7 +12,7 @@ import (
 
 	"github.com/boltdb/bolt"
 )
-var dbFile = fmt.Sprintf(Root+"/database/"+DBFile, os.Getenv("NODE_ID"))
+var dbFile = fmt.Sprintf(Root+"/database/"+dbFileName, nodeID)
 // Blockchain implements interactions with a DB
 type Blockchain struct {
 	tip []byte

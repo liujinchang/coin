@@ -9,8 +9,8 @@ import (
 	"os"
 	"utils"
 )
-var nodeID = os.Getenv("NODE_ID")
-var walletFile = fmt.Sprintf(Root+"/wallet/"+WalletFile, nodeID)
+
+var walletFile = fmt.Sprintf(Root+"/wallet/"+walletFileName, nodeID)
 // Wallets stores a collection of wallets
 type Wallets struct {
 	Wallets map[string]*Wallet

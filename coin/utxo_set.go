@@ -4,26 +4,25 @@ import (
 	"encoding/hex"
 	"fmt"
 	"log"
-	"os"
 	"utils"
 
 	"github.com/boltdb/bolt"
 )
 
-var bucketName = []byte(utxoBucket)
-var file = fmt.Sprintf(Root+"/database/"+StateFile, os.Getenv("NODE_ID"))
+var utxoBucketName = []byte(utxoBucket)
+var stateFile = fmt.Sprintf(Root+"/database/"+StateFile, nodeID)
 // UTXOSet represents UTXO set
 type UTXOSet struct {
 	Blockchain *Blockchain
-	Db *bolt.DB
+	db *bolt.DB
 }
 
 // FindSpendableOutputs finds and returns unspent outputs to reference in inputs
 func (u UTXOSet) FindSpendableOutputs(pubkeyHash []byte, amount int) (int, map[string][]int) {
 	unspentOutputs := make(map[string][]int)
 	accumulated := 0
-	err := u.Db.View(func(tx *bolt.Tx) error {
-		b := tx.Bucket(bucketName)
+	err := u.db.View(func(tx *bolt.Tx) error {
+		b := tx.Bucket(utxoBucketName)
 		c := b.Cursor()
 		for k, v := c.First(); k != nil; k, v = c.Next() {
 			txID := hex.EncodeToString(k)
@@ -44,8 +43,8 @@ func (u UTXOSet) FindSpendableOutputs(pubkeyHash []byte, amount int) (int, map[s
 // FindUTXO finds UTXO for a public key hash
 func (u UTXOSet) FindUTXO(pubKeyHash []byte) []TXOutput {
 	var UTXOs []TXOutput
-	err := u.Db.View(func(tx *bolt.Tx) error {
-		b := tx.Bucket(bucketName)
+	err := u.db.View(func(tx *bolt.Tx) error {
+		b := tx.Bucket(utxoBucketName)
 		c := b.Cursor()
 		for k, v := c.First(); k != nil; k, v = c.Next() {
 			outs := DeserializeOutputs(v)
@@ -64,8 +63,8 @@ func (u UTXOSet) FindUTXO(pubKeyHash []byte) []TXOutput {
 // CountTransactions returns the number of transactions in the UTXO set
 func (u UTXOSet) CountTransactions() int {
 	counter := 0
-	err := u.Db.View(func(tx *bolt.Tx) error {
-		b := tx.Bucket(bucketName)
+	err := u.db.View(func(tx *bolt.Tx) error {
+		b := tx.Bucket(utxoBucketName)
 		c := b.Cursor()
 		for k, _ := c.First(); k != nil; k, _ = c.Next() {
 			counter++
@@ -76,33 +75,33 @@ func (u UTXOSet) CountTransactions() int {
 	return counter
 }
 func (u UTXOSet) Init() UTXOSet{
-	if !utils.FileExists(file) {
+	if !utils.FileExists(stateFile) {
 		u.Reindex()
 	} else {
-		db, err := bolt.Open(file,0600,nil)
+		db, err := bolt.Open(stateFile,0600,nil)
 		utils.ErrorLog(err)
-		u.Db = db
+		u.db = db
 	}
 	return u
 }
 // Reindex rebuilds the UTXO set
 func (u UTXOSet) Reindex() {
 	fmt.Println("ReBuild the UTXO set!")
-	db, err := bolt.Open(file,0600,nil)
+	db, err := bolt.Open(stateFile,0600,nil)
 	utils.ErrorLog(err)
 	err = db.Update(func(tx *bolt.Tx) error {
-		err := tx.DeleteBucket(bucketName)
+		err := tx.DeleteBucket(utxoBucketName)
 		if err != nil && err != bolt.ErrBucketNotFound {
 			log.Panic(err)
 		}
-		_, err = tx.CreateBucket(bucketName)
+		_, err = tx.CreateBucket(utxoBucketName)
 		utils.ErrorLog(err)
 		return nil
 	})
 	utils.ErrorLog(err)
 	UTXO := u.Blockchain.FindUTXO()
 	err = db.Update(func(tx *bolt.Tx) error {
-		b := tx.Bucket(bucketName)
+		b := tx.Bucket(utxoBucketName)
 		for txID, outs := range UTXO {
 			key, err := hex.DecodeString(txID)
 			utils.ErrorLog(err)
@@ -111,14 +110,14 @@ func (u UTXOSet) Reindex() {
 		}
 		return nil
 	})
-	u.Db = db
+	u.db = db
 }
 
 // Update updates the UTXO set with transactions from the Block
 // The Block is considered to be the tip of a blockchain
 func (u UTXOSet) Update(block *Block) {
-	err := u.Db.Update(func(tx *bolt.Tx) error {
-		b := tx.Bucket(bucketName)
+	err := u.db.Update(func(tx *bolt.Tx) error {
+		b := tx.Bucket(utxoBucketName)
 		for _, tx := range block.Transactions {
 			if tx.IsCoinbase() == false {
 				for _, vin := range tx.Vin {
@@ -151,5 +150,5 @@ func (u UTXOSet) Update(block *Block) {
 	utils.ErrorLog(err)
 }
 func (u UTXOSet) GetDB() *bolt.DB{
-	return u.Db
+	return u.db
 }
