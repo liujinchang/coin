@@ -1,6 +1,7 @@
 package coin
 
 import (
+	"config"
 	"fmt"
 	"github.com/boltdb/bolt"
 	"log"
@@ -8,8 +9,8 @@ import (
 	"utils"
 )
 
-var mempoolFile = fmt.Sprintf(Root+"/database/"+mempoolFileName, nodeID)
-var mempoolBucketName = []byte("mempoolBucket")
+var mempoolFile = fmt.Sprintf(config.Root+"/database/"+mempoolFileName, nodeID)
+var mempoolBucketName = []byte(mempoolBucket)
 type Mempool struct {
 	db 			*bolt.DB
 }
@@ -24,7 +25,7 @@ func (m Mempool) AddTransactions(transactions []Transaction) {
 	})
 	utils.ErrorLog(err)
 }
-func (m Mempool) ReBuild() Mempool {
+func (m Mempool) ReBuild() *Mempool {
 	if !utils.FileExists(mempoolFile) {
 		os.Create(mempoolFile)
 		db, err := bolt.Open(mempoolFile,0600,nil)
@@ -45,7 +46,7 @@ func (m Mempool) ReBuild() Mempool {
 		utils.ErrorLog(err)
 		m.db = db
 	}
-	return m
+	return &m
 }
 func (m Mempool) FindTransactions(counter int) []Transaction {
 	var transactions []Transaction

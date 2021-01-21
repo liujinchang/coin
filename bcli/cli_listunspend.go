@@ -9,9 +9,9 @@ import (
 func (cli *CLI) listUnspend() {
 	bc := coin.FindBlockchain(false)
 	defer bc.GetDB().Close()
-	utxoSet := coin.UTXOSet{Blockchain: bc}
-	utxoSet = utxoSet.Init()
-	defer utxoSet.GetDB().Close()
+	db := utils.FindDB(stateFile)
+	utxoSet := coin.UTXOSet{bc,db}
+	defer utxoSet.DB.Close()
 	wallets, err := coin.FindWallets()
 	utils.ErrorLog(err)
 	addresses := wallets.GetAddresses()

@@ -15,10 +15,10 @@ func (cli *CLI) send(from, to string, amount int, mineNow bool) {
 		log.Panic("ERROR: Recipient address is not valid")
 	}
 	bc := coin.FindBlockchain(true)
-	UTXOSet := coin.UTXOSet{Blockchain: bc}
-	UTXOSet.Init()
+	db := utils.FindDB(stateFile)
+	UTXOSet := coin.UTXOSet{bc,db}
 	defer bc.GetDB().Close()
-	defer UTXOSet.GetDB().Close()
+	defer UTXOSet.DB.Close()
 	wallets, err := coin.FindWallets()
 	utils.ErrorLog(err)
 	wallet := wallets.GetWallet(from)

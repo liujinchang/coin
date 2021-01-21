@@ -2,23 +2,21 @@ package utils
 
 import (
 	"bufio"
+	"errors"
 	"io"
 	"os"
 	"strings"
 )
-
 /*
  * 读取key=value类型的配置文件
  * 		当前只开发读取属性文件，后期有时间可以增加读取yml文件、json文件、xml文件
  */
-var config map[string]string
-
-func initConfig(path string) map[string]string {
-	config := make(map[string]string)
+func ReadConfig(path string) (map[string]string, error) {
 	if FileExists(path) {
+		config := make(map[string]string)
 		f, err := os.Open(path)
-		defer f.Close()
 		ErrorLog(err)
+		defer f.Close()
 
 		r := bufio.NewReader(f)
 		for {
@@ -48,19 +46,8 @@ func initConfig(path string) map[string]string {
 			}
 			config[key] = value
 		}
+		return config, nil
+	} else {
+		return nil, errors.New("Config file is not exist!")
 	}
-	return config
-}
-func GetConfig(file string, key string) string{
-	if config == nil {
-		config = initConfig(file)
-	}
-	value := config[key]
-	switch key {
-		case "known_nodes" :
-			if value == "" {
-				value = "localhost:3000"
-			}
-	}
-	return value
 }

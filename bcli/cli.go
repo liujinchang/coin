@@ -2,12 +2,14 @@ package bcli
 
 import (
 	"coin"
+	"config"
 	"flag"
 	"fmt"
 	"os"
 	"strings"
 	"utils"
 )
+var stateFile = fmt.Sprintf(config.Root+"/database/"+coin.StateFile, os.Getenv("NODE_ID"))
 // CLI responsible for processing command line arguments
 type CLI struct{}
 func (cli *CLI) printUsage() {
@@ -33,7 +35,9 @@ func (cli *CLI) validateArgs() {
 
 // Run parses command line arguments and processes commands
 func (cli *CLI) Run() {
+	//准备环境
 	prepareEnv()
+	//校验参数
 	cli.validateArgs()
 	getBalanceCmd := flag.NewFlagSet("getbalance", flag.ExitOnError)
 	createBlockchainCmd := flag.NewFlagSet("createblockchain", flag.ExitOnError)
@@ -143,13 +147,13 @@ func prepareEnv() string {
 		fmt.Printf("NODE_ID env. var is not set!")
 		os.Exit(1)
 	}
-	if !utils.FileExists(coin.Root) {
-		err := os.Mkdir(coin.Root,0600)
+	if !utils.FileExists(config.Root) {
+		err := os.Mkdir(config.Root,0600)
 		utils.ErrorLog(err)
 	}
 	//创建配置文件夹
 	var builder strings.Builder
-	builder.WriteString(coin.Root)
+	builder.WriteString(config.Root)
 	builder.WriteString("/config")
 	dir := builder.String()
 	if !utils.FileExists(dir) {
@@ -158,7 +162,7 @@ func prepareEnv() string {
 	}
 	//创建数据库文件夹(用于存放区块数据库，区块状态（UTXO）数据库)
 	builder.Reset()
-	builder.WriteString(coin.Root)
+	builder.WriteString(config.Root)
 	builder.WriteString("/database")
 	dir = builder.String()
 	if !utils.FileExists(dir) {
@@ -167,7 +171,7 @@ func prepareEnv() string {
 	}
 	//创建钱包文件夹
 	builder.Reset()
-	builder.WriteString(coin.Root)
+	builder.WriteString(config.Root)
 	builder.WriteString("/wallet")
 	dir = builder.String()
 	if !utils.FileExists(dir) {

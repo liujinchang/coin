@@ -12,7 +12,6 @@ func (cli *CLI) printChain() {
 	for {
 		block := bci.Next()
 		fmt.Println(block)
-		fmt.Printf("\n")
 		if len(block.PrevBlockHash) == 0 {
 			break
 		}

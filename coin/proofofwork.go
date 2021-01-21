@@ -3,7 +3,6 @@ package coin
 import (
 	"bytes"
 	"crypto/sha256"
-	"fmt"
 	"math"
 	"math/big"
 	"utils"
@@ -23,17 +22,35 @@ func NewProofOfWork(b *Block) *ProofOfWork {
 	pow := &ProofOfWork{b, target}
 	return pow
 }
-func (pow *ProofOfWork) prepareData(nonce int) []byte {
-	data := bytes.Join(
-		[][]byte{
-			pow.block.PrevBlockHash,
-			pow.block.HashTransactions(),
-			utils.IntToHex(pow.block.Timestamp),
-			utils.IntToHex(int64(targetBits)),
-			utils.IntToHex(int64(nonce)),
-		},
-		[]byte{},
-	)
+func (pow *ProofOfWork) prepareData(nonce int, isValid bool) []byte {
+	var data []byte
+	/*
+	 * when valid, renew create hash of transactions in the block!
+	 * when mine, use hash created
+	 */
+	if isValid {
+		data = bytes.Join(
+			[][]byte{
+				pow.block.PrevBlockHash,
+				pow.block.HashTransactions(),
+				utils.IntToHex(pow.block.Timestamp),
+				utils.IntToHex(int64(targetBits)),
+				utils.IntToHex(int64(nonce)),
+			},
+			[]byte{},
+		)
+	} else {
+		data = bytes.Join(
+			[][]byte{
+				pow.block.PrevBlockHash,
+				pow.block.MerkleTreeRootHash,
+				utils.IntToHex(pow.block.Timestamp),
+				utils.IntToHex(int64(targetBits)),
+				utils.IntToHex(int64(nonce)),
+			},
+			[]byte{},
+		)
+	}
 	return data
 }
 
@@ -42,13 +59,9 @@ func (pow *ProofOfWork) Run() (int, []byte) {
 	var hashInt big.Int
 	var hash [32]byte
 	nonce := 0
-	fmt.Printf("Mining a new block")
 	for nonce < maxNonce {
-		data := pow.prepareData(nonce)
+		data := pow.prepareData(nonce,false)
 		hash = sha256.Sum256(data)
-		if math.Remainder(float64(nonce), 100000) == 0 {
-			fmt.Printf("\r%x", hash)
-		}
 		hashInt.SetBytes(hash[:])
 		if hashInt.Cmp(pow.target) == -1 {
 			break
@@ -56,13 +69,12 @@ func (pow *ProofOfWork) Run() (int, []byte) {
 			nonce++
 		}
 	}
-	fmt.Print("\n\n")
 	return nonce, hash[:]
 }
 // Validate validates block's PoW
 func (pow *ProofOfWork) Validate() bool {
 	var hashInt big.Int
-	data := pow.prepareData(pow.block.Nonce)
+	data := pow.prepareData(pow.block.Nonce,true)
 	hash := sha256.Sum256(data)
 	hashInt.SetBytes(hash[:])
 	isValid := hashInt.Cmp(pow.target) == -1

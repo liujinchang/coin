@@ -2,63 +2,93 @@ package coin
 
 import (
 	"bytes"
+	"config"
 	"crypto/ecdsa"
 	"encoding/hex"
 	"errors"
 	"fmt"
 	"log"
 	"os"
+	"strconv"
 	"utils"
 
 	"github.com/boltdb/bolt"
 )
-var dbFile = fmt.Sprintf(Root+"/database/"+dbFileName, nodeID)
-// Blockchain implements interactions with a DB
-type Blockchain struct {
-	tip []byte
-	db  *bolt.DB
-}
 
-// CreateBlockchain creates a new blockchain DB
-func CreateBlockchain(address string) *Blockchain {
-	if utils.FileExists(dbFile) {
-		fmt.Println("Blockchain already exists.")
-		os.Exit(1)
-	}
-	var tip []byte
-	cbtx := NewCoinbaseTX(address, genesisCoinbaseData)
-	genesis := NewGenesisBlock(cbtx)
-	db, err := bolt.Open(dbFile, 0600, nil)
+// Blockchain implements interactions with a DB
+var indexDb *bolt.DB
+type Blockchain struct {
+	tip 			[]byte
+	db  			*bolt.DB
+	dbFileIndex		int
+}
+func getDBfileIndex() []byte {
+	var fileIndex []byte
+	var err error
+	indexDb, err = bolt.Open(fmt.Sprintf(config.Root+"/database/index_%s.db", nodeID), 0600, nil)
 	utils.ErrorLog(err)
-	err = db.Update(func(tx *bolt.Tx) error {
-		b, err := tx.CreateBucket([]byte(blocksBucket))
+	err = indexDb.Update(func(tx *bolt.Tx) error {
+		b, err := tx.CreateBucketIfNotExists([]byte("index"))
 		utils.ErrorLog(err)
-		err = b.Put(genesis.Hash, utils.GobEncode(genesis))
-		utils.ErrorLog(err)
-		err = b.Put([]byte("l"), genesis.Hash)
-		utils.ErrorLog(err)
-		tip = genesis.Hash
+		fileIndex = b.Get([]byte("fileIndex"))
+		if fileIndex == nil {
+			fileIndex = []byte("000000")
+			b.Put([]byte("fileIndex"), fileIndex)
+		}
 		return nil
 	})
 	utils.ErrorLog(err)
-	bc := Blockchain{tip, db}
-	return &bc
+	return fileIndex
+}
+// CreateBlockchain creates a new blockchain DB
+func CreateBlockchain(address string) *Blockchain {
+	var dbFileIndex string = string(getDBfileIndex())
+	var dbFile = fmt.Sprintf(config.Root + "/database/" + dbFileName, nodeID, dbFileIndex)
+	if utils.FileExists(dbFile) {
+		fmt.Println("Blockchain already exists.")
+		os.Exit(1)
+	} else {
+		var tip []byte
+		cbtx := NewCoinbaseTX(address, genesisCoinbaseData)
+		genesis := NewGenesisBlock(cbtx)
+		db, err := bolt.Open(dbFile,0600,nil)
+		utils.ErrorLog(err)
+		err = db.Update(func(tx *bolt.Tx) error {
+			b, err := tx.CreateBucket([]byte(blocksBucket))
+			utils.ErrorLog(err)
+			err = b.Put(genesis.Hash, utils.GobEncode(genesis))
+			utils.ErrorLog(err)
+			err = b.Put([]byte("l"), genesis.Hash)
+			utils.ErrorLog(err)
+			tip = genesis.Hash
+			return nil
+		})
+		utils.ErrorLog(err)
+		index, err := strconv.Atoi(dbFileIndex)
+		utils.ErrorLog(err)
+		bc := Blockchain{tip,db,index}
+		bc.createIndex(genesis)
+		return &bc
+	}
+	return nil
 }
 
 // FindBlockchain finds a Blockchain with genesis Block
 // 本地不存在区块链时，是否退出程序
 func FindBlockchain(isExit bool) *Blockchain {
 	var bc Blockchain
-	if utils.FileExists(dbFile) == false {
+	var dbFileIndex string = string(getDBfileIndex())
+	var dbFile = fmt.Sprintf(config.Root + "/database/" + dbFileName, nodeID, dbFileIndex)
+	if !utils.FileExists(dbFile) {
 		if isExit {
 			fmt.Println("No existing blockchain found. Create one first.")
 			os.Exit(1)
 		} else {
-			bc = Blockchain{[]byte{},nil}
+			bc = Blockchain{[]byte{},nil,0}
 		}
 	} else {
 		var tip []byte
-		db, err := bolt.Open(dbFile, 0600, nil)
+		db, err := bolt.Open(dbFile,0600,nil)
 		utils.ErrorLog(err)
 		err = db.Update(func(tx *bolt.Tx) error {
 			b := tx.Bucket([]byte(blocksBucket))
@@ -67,9 +97,11 @@ func FindBlockchain(isExit bool) *Blockchain {
 		})
 		utils.ErrorLog(err)
 		if tip != nil {
-			bc = Blockchain{tip, db}
+			index, err := strconv.Atoi(dbFileIndex)
+			utils.ErrorLog(err)
+			bc = Blockchain{tip,db,index}
 		} else {
-			bc = Blockchain{[]byte{},nil}
+			bc = Blockchain{[]byte{},nil,0}
 		}
 	}
 	return &bc
@@ -77,14 +109,32 @@ func FindBlockchain(isExit bool) *Blockchain {
 
 // AddBlock saves the block into the blockchain
 func (bc *Blockchain) AddBlock(block *Block) {
+	//There are 10 blocks in the db file
+	if (block.Height+1) % blockCountInFile == 0 {
+		bc.db.Close()
+		bc.dbFileIndex++
+		var dbFileIndex = utils.TransformFileIndex(bc.dbFileIndex)
+		var dbFile = fmt.Sprintf(config.Root + "/database/" + dbFileName, nodeID, dbFileIndex)
+		db, err := bolt.Open(dbFile,0600,nil)
+		utils.ErrorLog(err)
+		bc.db = db
+		err = indexDb.Update(func(tx *bolt.Tx) error {
+			b, err := tx.CreateBucketIfNotExists([]byte("index"))
+			utils.ErrorLog(err)
+			b.Put([]byte("fileIndex"),[]byte(dbFileIndex))
+			return nil
+		})
+		utils.ErrorLog(err)
+	}
 	err := bc.db.Update(func(tx *bolt.Tx) error {
-		b := tx.Bucket([]byte(blocksBucket))
+		b, err := tx.CreateBucketIfNotExists([]byte(blocksBucket))
+		utils.ErrorLog(err)
 		blockInDb := b.Get(block.Hash)
 		if blockInDb != nil {
 			return nil
 		}
 		blockData := utils.GobEncode(block)
-		err := b.Put(block.Hash, blockData)
+		err = b.Put(block.Hash, blockData)
 		utils.ErrorLog(err)
 		lastHash := b.Get([]byte("l"))
 		if lastHash == nil {
@@ -99,6 +149,7 @@ func (bc *Blockchain) AddBlock(block *Block) {
 		return nil
 	})
 	utils.ErrorLog(err)
+	bc.createIndex(block)
 }
 func (bc *Blockchain) SetLeader(bucket *bolt.Bucket,blockhash []byte) {
 	err := bucket.Put([]byte("l"),blockhash)
@@ -161,7 +212,7 @@ func (bc *Blockchain) FindUTXO() map[string]TXOutputs {
 
 // Iterator returns a BlockchainIterat
 func (bc *Blockchain) Iterator() *BlockchainIterator {
-	return &BlockchainIterator{bc.tip, bc.db}
+	return &BlockchainIterator{bc.tip,bc.db,bc.dbFileIndex}
 }
 // GetBestHeight returns the height of the latest block
 func (bc *Blockchain) GetBestHeight() int {
@@ -179,8 +230,24 @@ func (bc *Blockchain) GetBestHeight() int {
 
 // GetBlock finds a block by its hash and returns it
 func (bc *Blockchain) GetBlock(blockHash []byte) (Block, error) {
+	var fileIndex string
+	indexDb.View(func(tx *bolt.Tx) error {
+		b := tx.Bucket([]byte("index"))
+		fileIndex = string(b.Get(blockHash))
+		return nil
+	})
+	var db *bolt.DB
+	var err error
+	if fileIndex != utils.TransformFileIndex(bc.dbFileIndex) {
+		var dbFile = fmt.Sprintf(config.Root + "/database/" + dbFileName, nodeID, fileIndex)
+		db, err = bolt.Open(dbFile, 0600, nil)
+		utils.ErrorLog(err)
+		defer db.Close()
+	} else {
+		db = bc.db
+	}
 	var block Block
-	err := bc.db.View(func(tx *bolt.Tx) error {
+	err = db.View(func(tx *bolt.Tx) error {
 		b := tx.Bucket([]byte(blocksBucket))
 		blockData := b.Get(blockHash)
 		if blockData == nil {
@@ -243,9 +310,27 @@ func (bc *Blockchain) MineBlock(transactions []*Transaction) *Block {
 	})
 	utils.ErrorLog(err)
 	newBlock := NewBlock(transactions, lastHash, lastHeight+1)
+	if (newBlock.Height+1) % blockCountInFile == 0 {
+		defer bc.db.Close()
+		bc.dbFileIndex++
+		var dbFileIndex = utils.TransformFileIndex(bc.dbFileIndex)
+		var dbFile = fmt.Sprintf(config.Root + "/database/" + dbFileName, nodeID, dbFileIndex)
+		db, err := bolt.Open(dbFile,0600,nil)
+		utils.ErrorLog(err)
+		bc.db = db
+		err = indexDb.Update(func(tx *bolt.Tx) error {
+			b, err := tx.CreateBucketIfNotExists([]byte("index"))
+			utils.ErrorLog(err)
+			b.Put([]byte("fileIndex"),[]byte(dbFileIndex))
+			return nil
+		})
+		utils.ErrorLog(err)
+	}
+
 	err = bc.db.Update(func(tx *bolt.Tx) error {
-		b := tx.Bucket([]byte(blocksBucket))
-		err := b.Put(newBlock.Hash, utils.GobEncode(newBlock))
+		b, err := tx.CreateBucketIfNotExists([]byte(blocksBucket))
+		utils.ErrorLog(err)
+		err = b.Put(newBlock.Hash, utils.GobEncode(newBlock))
 		utils.ErrorLog(err)
 		err = b.Put([]byte("l"), newBlock.Hash)
 		utils.ErrorLog(err)
@@ -253,6 +338,7 @@ func (bc *Blockchain) MineBlock(transactions []*Transaction) *Block {
 		return nil
 	})
 	utils.ErrorLog(err)
+	bc.createIndex(newBlock)
 	return newBlock
 }
 
@@ -283,4 +369,13 @@ func (bc *Blockchain) VerifyTransaction(tx *Transaction) bool {
 //GetDB get database of blockchain
 func (bc *Blockchain) GetDB() *bolt.DB{
 	return bc.db
+}
+func (bc *Blockchain) createIndex(block *Block){
+	err := indexDb.Update(func(tx *bolt.Tx) error {
+		b, err := tx.CreateBucketIfNotExists([]byte("index"))
+		utils.ErrorLog(err)
+		b.Put(block.Hash,[]byte(utils.TransformFileIndex(bc.dbFileIndex)))
+		return nil
+	})
+	utils.ErrorLog(err)
 }

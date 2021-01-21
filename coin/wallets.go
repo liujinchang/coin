@@ -2,6 +2,7 @@ package coin
 
 import (
 	"bytes"
+	"config"
 	"crypto/elliptic"
 	"encoding/gob"
 	"fmt"
@@ -10,7 +11,7 @@ import (
 	"utils"
 )
 
-var walletFile = fmt.Sprintf(Root+"/wallet/"+walletFileName, nodeID)
+var walletFile = fmt.Sprintf(config.Root+"/wallet/"+walletFileName, nodeID)
 // Wallets stores a collection of wallets
 type Wallets struct {
 	Wallets map[string]*Wallet

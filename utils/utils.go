@@ -4,8 +4,10 @@ import (
 	"bytes"
 	"encoding/binary"
 	"encoding/gob"
+	"github.com/boltdb/bolt"
 	"log"
 	"os"
+	"strconv"
 )
 // IntToHex converts an int64 to a byte array
 func IntToHex(num int64) []byte {
@@ -39,4 +41,18 @@ func FileExists(file string) bool {
 		return false
 	}
 	return true
+}
+func FindDB(file string) *bolt.DB {
+	db, err := bolt.Open(file,0600,nil)
+	ErrorLog(err)
+	return db
+}
+func TransformFileIndex(index int) string {
+	var bt bytes.Buffer
+	dbFileIndex := strconv.Itoa(index)
+	for i := 0; i < 6 - len(dbFileIndex); i++ {
+		bt.WriteString("0")
+	}
+	bt.WriteString(dbFileIndex)
+	return bt.String()
 }

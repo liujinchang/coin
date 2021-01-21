@@ -2,25 +2,35 @@ package coin
 
 import (
 	"bytes"
+	"config"
 	"encoding/gob"
 	"encoding/hex"
 	"fmt"
 	"github.com/boltdb/bolt"
 	"io"
 	"io/ioutil"
+	"log"
 	"net"
 	"os"
+	"strconv"
 	"strings"
 	"utils"
 )
 
 var nodeAddress string
 var miningAddress string
-var knownNodes = strings.Split(utils.GetConfig(Root+"/config/"+configFile,"known_nodes"),",")
+var knownNodes []string
 var blocksInTransit = [][]byte{}
-var mempool = make(map[string]Transaction)
-var mp = Mempool{}.ReBuild()
+var mempool pool
+var utxoSet *UTXOSet
+var stateFile = fmt.Sprintf(config.Root+"/database/"+StateFile, nodeID)
 
+type pool struct {
+	//in memory
+	pool 	map[string]Transaction
+	//in db
+	mp 		*Mempool
+}
 type addr struct {
 	AddrList []string
 }
@@ -99,7 +109,7 @@ func sendBlock(addr string, b *Block) {
 func sendData(addr string, data []byte) {
 	conn, err := net.Dial(protocol, addr)
 	if err != nil {
-		fmt.Printf("%s is not available\n", addr)
+		log.Printf("%s is not available\n", addr)
 		var updatedNodes []string
 		for _, node := range knownNodes {
 			if node != addr {
@@ -168,7 +178,7 @@ func handleAddr(request []byte) {
 	err := dec.Decode(&payload)
 	utils.ErrorLog(err)
 	knownNodes = append(knownNodes, payload.AddrList...)
-	fmt.Printf("There are %d known nodes now!\n", len(knownNodes))
+	log.Printf("There are %d known nodes now!\n", len(knownNodes))
 	requestBlocks()
 }
 
@@ -182,9 +192,9 @@ func handleBlock(request []byte, bc *Blockchain) {
 	utils.ErrorLog(err)
 	blockData := payload.Block
 	block := DeserializeBlock(blockData)
-	fmt.Println("Recevied a new block!")
+	log.Println("Recevied a new block!")
 	if bc.db == nil {
-		dbFile := fmt.Sprintf(dbFile, os.Getenv("NODE_ID"))
+		dbFile := fmt.Sprintf(config.Root + "/database/" + dbFileName, nodeID, utils.TransformFileIndex(bc.dbFileIndex))
 		db, err := bolt.Open(dbFile, 0600, nil)
 		utils.ErrorLog(err)
 		err = db.Update(func(tx *bolt.Tx) error {
@@ -196,10 +206,13 @@ func handleBlock(request []byte, bc *Blockchain) {
 		bc.db = db
 	}
 	bc.AddBlock(block)
-
-	fmt.Printf("Added block %x\n", block.Hash)
+	//应该在每增加一个块时进行UTXOSet.update(block)
+	if utxoSet == nil {
+		utxoSet = &UTXOSet{bc,utils.FindDB(stateFile)}
+	}
+	utxoSet.Update(block)
+	log.Printf("Added block %x\n", block.Hash)
 	if len(blocksInTransit) > 0 {
-		fmt.Println(len(blocksInTransit))
 		var bh []byte
 		for _, blockHash := range blocksInTransit {
 			//只请求本结点不存在的块
@@ -218,11 +231,42 @@ func handleBlock(request []byte, bc *Blockchain) {
 			}
 		}
 		blocksInTransit = updateBlockInTransit
-		fmt.Println(len(blocksInTransit))
 	} else {
-		UTXOSet := UTXOSet{Blockchain: bc}
-		//应该在每增加一个块时进行UTXOSet.update(block)
-		UTXOSet.Reindex()
+		//when receive new block, start mine!
+		if len(miningAddress) > 0 {
+		MineTransactions:
+			var txs []*Transaction
+			counter := 0
+			for id := range mempool.pool {
+				counter++
+				if counter > MaxTransactionCount {
+					break
+				} else {
+					tx := mempool.pool[id]
+					if bc.VerifyTransaction(&tx) {
+						txs = append(txs, &tx)
+					}
+				}
+			}
+			cbTx := NewCoinbaseTX(miningAddress, "")
+			txs = append(txs, cbTx)
+			newBlock := bc.MineBlock(txs)
+			utxoSet.Update(newBlock)
+			log.Println("New block is mined!")
+			for _, tx := range txs {
+				txID := hex.EncodeToString(tx.ID)
+				delete(mempool.pool, txID)
+			}
+			for _, node := range knownNodes {
+				if node != nodeAddress {
+					sendInv(node, "block", [][]byte{newBlock.Hash})
+				}
+			}
+			if len(mempool.pool) > 0 {
+				goto MineTransactions
+			}
+		}
+		//defer utxoSet.DB.Close()
 	}
 }
 
@@ -234,7 +278,7 @@ func handleInv(request []byte, bc *Blockchain) {
 	dec := gob.NewDecoder(&buff)
 	err := dec.Decode(&payload)
 	utils.ErrorLog(err)
-	fmt.Printf("Recevied inventory with %d %s\n", len(payload.Items), payload.Type)
+	log.Printf("Recevied inventory with %d %s\n", len(payload.Items), payload.Type)
 
 	if payload.Type == "block" {
 		//从连接结点拿到所有块，过滤到本地存在的块，即是本地缺失的块
@@ -266,7 +310,7 @@ func handleInv(request []byte, bc *Blockchain) {
 
 	if payload.Type == "tx" {
 		txID := payload.Items[0]
-		if mempool[hex.EncodeToString(txID)].ID == nil {
+		if mempool.pool[hex.EncodeToString(txID)].ID == nil {
 			sendGetData(payload.AddrFrom, "tx", txID)
 		}
 	}
@@ -301,9 +345,9 @@ func handleGetData(request []byte, bc *Blockchain) {
 	}
 	if payload.Type == "tx" {
 		txID := hex.EncodeToString(payload.ID)
-		tx := mempool[txID]
+		tx := mempool.pool[txID]
 		SendTx(payload.AddrFrom, &tx)
-		delete(mempool, txID)
+		delete(mempool.pool, txID)
 	}
 }
 
@@ -316,69 +360,13 @@ func handleTx(request []byte, bc *Blockchain) {
 	utils.ErrorLog(err)
 	txData := payload.Transaction
 	tx := DeserializeTransaction(txData)
-	//mempool := Mempool{Blockchain: bc}
-
-	mempool[hex.EncodeToString(tx.ID)] = tx
-	length := len(mempool)
-	if length >= 15 {
-		var transactions []Transaction
-		counter := len(mempool)-15
-		for id := range mempool {
-			transactions = append(transactions, mempool[id])
-			counter--
-			if counter == 0 {
-				break
-			}
-		}
-		mp.AddTransactions(transactions)
-	} else if length <= 10 {
-		counter := 10-len(mempool)+int((15-10)/2)
-		transactions := mp.FindTransactions(counter)
-		for _, t := range transactions {
-			mempool[hex.EncodeToString(t.ID)] = t
-		}
-	}
+	mempool.pool[hex.EncodeToString(tx.ID)] = tx
+	//内存与数据库动态交换交易 保证内存中存放到的交易在10到15之间
+	changeTransactions()
 	if nodeAddress == knownNodes[0] {
 		for _, node := range knownNodes {
 			if node != nodeAddress && node != payload.AddFrom {
 				sendInv(node, "tx", [][]byte{tx.ID})
-			}
-		}
-	} else {
-		if len(mempool) >= 2 && len(miningAddress) > 0 {
-		MineTransactions:
-			var txs []*Transaction
-			for id := range mempool {
-				tx := mempool[id]
-				if bc.VerifyTransaction(&tx) {
-					txs = append(txs, &tx)
-				}
-			}
-			if len(txs) == 0 {
-				fmt.Println("All transactions are invalid! Waiting for new ones...")
-				return
-			}
-			cbTx := NewCoinbaseTX(miningAddress, "")
-			txs = append(txs, cbTx)
-
-			newBlock := bc.MineBlock(txs)
-			UTXOSet := UTXOSet{Blockchain: bc}
-			UTXOSet = UTXOSet.Init()
-			UTXOSet.Update(newBlock)
-			defer UTXOSet.GetDB().Close()
-
-			fmt.Println("New block is mined!")
-			for _, tx := range txs {
-				txID := hex.EncodeToString(tx.ID)
-				delete(mempool, txID)
-			}
-			for _, node := range knownNodes {
-				if node != nodeAddress {
-					sendInv(node, "block", [][]byte{newBlock.Hash})
-				}
-			}
-			if len(mempool) > 0 {
-				goto MineTransactions
 			}
 		}
 	}
@@ -415,7 +403,7 @@ func handleConnection(conn net.Conn, bc *Blockchain) {
 	request, err := ioutil.ReadAll(conn)
 	utils.ErrorLog(err)
 	command := bytesToCommand(request[:commandLength])
-	fmt.Printf("Received %s command\n", command)
+	log.Printf("Received %s command\n", command)
 	switch command {
 		case "addr":
 			handleAddr(request)
@@ -432,13 +420,15 @@ func handleConnection(conn net.Conn, bc *Blockchain) {
 		case "version":
 			handleVersion(request, bc)
 		default:
-			fmt.Println("Unknown command!")
+			log.Println("Unknown command!")
 	}
 	conn.Close()
 }
 
 // StartServer starts a node
 func StartServer(minerAddress string) {
+	mempool = pool{make(map[string]Transaction),Mempool{}.ReBuild()}
+	knownNodes = strings.Split(config.GetConfig("known_nodes"),",")
 	nodeAddress = fmt.Sprintf("localhost:%s", nodeID)
 	miningAddress = minerAddress
 	ln, err := net.Listen(protocol, nodeAddress)
@@ -463,31 +453,35 @@ func nodeIsKnown(addr string) bool {
 	}
 	return false
 }
-//内存与数据库交换交易
+/*
+ * 内存与数据库交换交易 保证内存中交易数量保持在上限值下限值之间
+ * 		上下限的阀值，表示在内存中存放交易的数量
+ * 			当内存中存储的交易大于上限值时，把len(mempool.pool)-上限值+int((上限值-下限值)/2)个数据从内存放入到数据库中
+ * 			当内存中存储的交易小于下限值时，把下限值-len(mempool.pool)+int((上限值-下限值)/2)个数据从数据库中加载进内存
+ */
 func changeTransactions(){
-	length := len(mempool)
-	/*
-	 * 10，15为上下限的阀值，表示在内存中只存放10-15个交易
-	 * 		当内存中存储的交易大于15个时，把len(mempool)-15+int((15-10)/2)个数据从内存放入到数据库中
-	 * 		当内存中存储的交易小于10个时，把10-len(mempool)+int((15-10)/2)个数据从数据库中加载进内存
-	 *
-	 */
-	if length >= 15 {
+	length := len(mempool.pool)
+	upperLimitTransactionInMemory, err := strconv.Atoi(config.GetConfig(config.UpperLimitTransactionInMemory))
+	utils.ErrorLog(err)
+	lowerLimitTransactionInMemory, err := strconv.Atoi(config.GetConfig(config.LowerLimitTransactionInMemory))
+	utils.ErrorLog(err)
+	half := int((upperLimitTransactionInMemory-lowerLimitTransactionInMemory)/2)
+	if length > upperLimitTransactionInMemory {
 		var transactions []Transaction
-		counter := len(mempool)-15+int((15-10)/2)
-		for id := range mempool {
-			transactions = append(transactions, mempool[id])
+		counter := len(mempool.pool)-upperLimitTransactionInMemory+half
+		for id := range mempool.pool {
+			transactions = append(transactions, mempool.pool[id])
 			counter--
 			if counter == 0 {
 				break
 			}
 		}
-		mp.AddTransactions(transactions)
-	} else if length <= 10 {
-		counter := 10-len(mempool)+int((15-10)/2)
-		transactions := mp.FindTransactions(counter)
+		mempool.mp.AddTransactions(transactions)
+	} else if length < lowerLimitTransactionInMemory {
+		counter := lowerLimitTransactionInMemory-len(mempool.pool)+half
+		transactions := mempool.mp.FindTransactions(counter)
 		for _, t := range transactions {
-			mempool[hex.EncodeToString(t.ID)] = t
+			mempool.pool[hex.EncodeToString(t.ID)] = t
 		}
 	}
 }

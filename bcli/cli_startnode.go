@@ -2,6 +2,7 @@ package bcli
 
 import (
 	"coin"
+	"config"
 	"fmt"
 	"log"
 	"os"
@@ -16,5 +17,7 @@ func (cli *CLI) startNode(minerAddress string) {
 			log.Panic("Wrong miner address!")
 		}
 	}
+	//≥ı ºªØ≈‰÷√
+	config.InitConfigs()
 	coin.StartServer(minerAddress)
 }

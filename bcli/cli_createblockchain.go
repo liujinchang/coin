@@ -1,9 +1,10 @@
 package bcli
 
 import (
+	"coin"
 	"fmt"
 	"log"
-	"coin"
+	"utils"
 )
 
 func (cli *CLI) createBlockchain(address string) {
@@ -11,8 +12,9 @@ func (cli *CLI) createBlockchain(address string) {
 		log.Panic("ERROR: Address is not valid")
 	}
 	bc := coin.CreateBlockchain(address)
+	db := utils.FindDB(stateFile)
 	defer bc.GetDB().Close()
-	UTXOSet := coin.UTXOSet{Blockchain:bc}
-	UTXOSet.Reindex()
+	utxoSet := coin.UTXOSet{bc,db}
+	utxoSet.Reindex()
 	fmt.Println("Done!")
 }
